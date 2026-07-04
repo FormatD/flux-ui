@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Generated / runtime
+backend/data/
+backend/output/
+backend/uploads/
+backend/logs/
+
+# Configuration
+backend/.env
+
+# Tools
+.codex/
+.agents/
+.vscode/
