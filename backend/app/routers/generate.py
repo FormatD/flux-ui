@@ -1,7 +1,8 @@
 import random
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from ..logger import get_logger
+from ..rate_limiter import rate_limiter
 from ..schemas.schemas import GenerateRequest, Img2ImgRequest
 from ..services.task_queue import task_queue
 
@@ -10,7 +11,7 @@ log = get_logger("api.generate")
 
 
 @router.post("/text2img")
-async def text_to_image(req: GenerateRequest):
+async def text_to_image(req: GenerateRequest, _limiter=Depends(rate_limiter)):
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required")
 
@@ -41,7 +42,7 @@ async def text_to_image(req: GenerateRequest):
 
 
 @router.post("/img2img")
-async def image_to_image(req: Img2ImgRequest):
+async def image_to_image(req: Img2ImgRequest, _limiter=Depends(rate_limiter)):
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required")
     if not req.image_path:
