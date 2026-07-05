@@ -214,3 +214,42 @@
 - `check_same_thread=False` 允许在 TaskQueue 后台线程中使用独立 Session
 - `image_path` 存储的是 URL 路径（如 `/api/output/xxx.png`），而非文件系统绝对路径
 - `params` 字段以 JSON 文本格式存储完整参数快照，可用于故障排查和任务重放
+
+---
+
+## 9. 已知设计缺陷与技术债
+
+以下问题来自 Architecture Review，应在后续迭代中解决。
+
+### 9.1 SQLite 未启用 WAL 模式
+
+当前未设置 `PRAGMA journal_mode=WAL`。TaskQueue 后台线程与 FastAPI 异步处理器同时写入时，SQLite 默认序列化模式可能导致 `database is locked` 错误。`_update_task_status` 静默吞掉所有异常，失败不可见。
+
+**建议：** `engine = create_engine(..., connect_args={"check_same_thread": False})` 后执行 `PRAGMA journal_mode=WAL`，并增加写操作的显式异常处理。
+
+### 9.2 image_path 存储 URL 导致文件删除失效
+
+`image_path` 存储 URL 格式路径（`/api/output/xxx.png`），但 `images.py` 的删除端点使用 `os.path.exists()` 和 `os.remove()` 直接操作此字符串，总是返回 False，静默不删除物理文件。
+
+**建议：** 存储时保留文件系统绝对路径，或删除前标准化：
+```python
+real_path = os.path.join(OUTPUT_DIR, os.path.basename(record.image_path))
+```
+
+### 9.3 thumbnail_path 是死字段
+
+`ImageRecord.thumbnail_path` 已定义但从未写入有意义的值（始终为空字符串）。`images.py` 的删除逻辑试图检查并删除此路径。
+
+**建议：** 实现缩略图生成（推荐用于浏览器性能），或移除此列。
+
+### 9.4 偏移分页的性能瓶颈
+
+当前使用 `page` + `page_size` 偏移分页，最大 100 条。当图片库增长到数千条时，SQLite 需扫描并跳过所有前序行。
+
+**建议：** 图片数超过 ~1000 后迁移至 cursor 分页。
+
+### 9.5 无显式事务管理
+
+当前多表操作未使用 SQLAlchemy 显式事务。`_save_record()` 和 `_update_task_status()` 各自独立 Session，事务边界不明确。
+
+**建议：** 对涉及多表一致性的操作使用 `session.begin()` 上下文管理器。

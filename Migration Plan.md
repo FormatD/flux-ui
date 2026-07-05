@@ -156,3 +156,47 @@ Phase 4 ──► Phase 5 ──► Phase 6
 - **API 版本**：重大变更时使用 URL prefix `/api/v2`，兼容旧版本
 - **前端回滚**：所有静态文件通过 Vite build 产物部署，保留上一版本备份
 - **配置回滚**：`settings` 表中的每项设置单独存储，可逐项恢复
+
+## 8. Architecture Review 新增项
+
+以下任务来自 Design Challenger 的架构评审，按优先级排列。
+
+### 8.1 关键修复（P0，立即处理）
+
+| 任务 | 关联风险 | 估算 |
+|------|----------|------|
+| 子进程句柄持有 + 取消时 terminate | R2 | 2h |
+| 添加子进程执行超时（默认 600s） | R3 | 2h |
+| image_path 删除时 normalize 为文件路径 | R5 | 1h |
+| 启用 SQLite WAL 模式 | R4 | 0.5h |
+
+### 8.2 高优先级（P1）
+
+| 任务 | 关联风险 | 估算 |
+|------|----------|------|
+| Img2ImgRequest 添加 width/height 字段 | R8 | 1h |
+| Pydantic schema 添加 steps `ge=2` 校验 | B2 | 0.5h |
+| WebSocket 客户端防重复连接 | R9 | 1h |
+| 移除 Text2Img HTTP 轮询，WebSocket 作为唯一通道 | B1, P2 | 2h |
+| 默认绑定 127.0.0.1，可选 LAN 暴露 | P3 | 0.5h |
+
+### 8.3 中优先级（P2）
+
+| 任务 | 关联风险 | 估算 |
+|------|----------|------|
+| 实现缩略图生成或移除 dead field | R6 | 3h |
+| 批量生成展示全部结果图 | R7 | 3h |
+| 模型扫描异步化 + WS 进度 | B4 | 2h |
+| 移除 `allow_credentials=True` 或固化 CORS 策略 | R1 | 0.5h |
+| 添加服务端 WebSocket 心跳 | R10 | 1h |
+| 添加请求速率限制 | P3 | 2h |
+
+### 8.4 低优先级（P3）
+
+| 任务 | 关联风险 | 估算 |
+|------|----------|------|
+| 迁移至 cursor 分页 | B5 | 3h |
+| negative_prompt 不支持的模型返回前端警告 | B3 | 1h |
+| 添加配置化 worker 池支持并行生成 | P1 | 5h |
+| 添加显式 DB 事务管理 | 9.5 | 2h |
+| 图片 masonry 视图使用真实宽高比 | B5 | 2h |

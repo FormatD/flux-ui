@@ -510,3 +510,29 @@ server: {
 ```
 
 生产构建时需配置 Nginx 或等效反向代理。
+
+---
+
+## 13. 已知接口缺陷
+
+以下问题来自 Architecture Review，应在后续版本中修正。
+
+### 13.1 Img2Img 硬编码尺寸
+
+`POST /api/generate/img2img` 在后端硬编码 `width=1024, height=1024`，前端 ParameterPanel 中的尺寸选择被静默忽略。`Img2ImgRequest` schema 缺少 `width`/`height` 字段。
+
+**建议：** 在 `Img2ImgRequest` 中添加 `width` 和 `height` 字段并传递到生成任务。
+
+### 13.2 批量生成仅展示最后一张图
+
+`batch_count > 1` 时，每张图片都写入 `ImageRecord`，但 task 的 `result_path` 仅记录最后一次调用的返回值，前端仅展示单张图片。
+
+**建议：** 有两种修正方向：
+- 方案 A：每个 batch 项创建独立子任务（推荐，与单图工作流一致）
+- 方案 B：task 模型支持多 result 路径列表，前端展示图集
+
+### 13.3 Steps 最小值为 1 但后端强制为 2
+
+`Img2ImgRequest.steps` 和 `GenerateRequest.steps` 的 Pydantic 定义未做 `ge=2` 校验，后端 `generator.py` 静默做 `steps = max(steps, 2)`。
+
+**建议：** 在 Pydantic schema 中设置 `steps: int = Field(default=4, ge=2)`，前后端约束对齐。

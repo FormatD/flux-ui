@@ -242,3 +242,31 @@ FastAPI 接受连接 → manager.connect(ws)
 | GPU 集群 | 将 generator 抽离为独立 RPC 服务 |
 | 图库浏览器 | 增加 EXIF/元数据标签，实现标签树 + 搜索 |
 | 国际化 i18n | 已预留 language 设置字段，引入 vue-i18n |
+
+---
+
+## 9. 已知设计缺陷与技术债
+
+以下问题来自 Architecture Review，应在后续迭代中解决。
+
+### 9.1 CORS 配置矛盾
+
+`allow_origins=["*"]` 与 `allow_credentials=True` 同时设置时，浏览器会拒绝通配符 origin 下的凭据。当前配置实际上是 dead code。建议保持 `allow_origins=["*"]` 并移除 `allow_credentials=True`，或为 LAN 场景指定具体 origin。
+
+### 9.2 子进程生命周期缺失管理
+
+`TaskQueue.cancel_task()` 仅更新内存状态标记，未终止正在运行的 `subprocess.Popen` 进程。若用户取消长时间生成任务，子进程仍持续消耗 GPU 资源。合并 R3 的超时控制缺失，单次挂起的子进程会永久阻塞唯一的任务队列工作线程，导致整个应用不可用。
+
+**建议：** 在任务状态中持有 Popen 句柄，取消时调用 `process.terminate()`，并添加可配置的任务级超时（默认 600s）。
+
+### 9.3 前端轮询三重冗余
+
+`Text2Img.vue` 每 2s 轮询 `/api/tasks/{task_id}`，`TaskPanel.vue` 每 2s 轮询 `/api/tasks/queue`，WebSocket 已推送 `task_completed`/`task_error`/`progress`。三重冗余产生约 5400 请求/小时。
+
+**建议：** 以 WebSocket 作为唯一实时通道，移除 Text2Img 的 HTTP 轮询，Store 级轮询降级为 30s 后备。
+
+### 9.4 威胁模型说明
+
+当前 `HOST=0.0.0.0` 暴露所有端口到局域网，CORS `allow_origins=["*"]` 允许任意来源请求，且无认证/速率限制/CSRF 保护。这是针对本地单用户场景的有意设计约束，在局域网使用时应评估风险。
+
+**建议：** 默认绑定 `127.0.0.1`，提供环境变量可选开启 LAN 访问。
