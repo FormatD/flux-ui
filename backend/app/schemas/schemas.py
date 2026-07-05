@@ -24,6 +24,8 @@ class Img2ImgRequest(BaseModel):
     seed: Optional[int] = None
     strength: float = 0.8
     image_path: str = ""
+    width: int = 1024
+    height: int = 1024
 
 
 class ImageRecordResponse(BaseModel):
