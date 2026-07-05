@@ -4,7 +4,7 @@ import random
 import signal
 import subprocess
 import shutil
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Any
 from datetime import datetime
 
 from ..logger import get_logger
@@ -79,6 +79,7 @@ def _url_path(filepath: str) -> str:
 def generate_image(
     prompt: str,
     task_id: str,
+    process_registry: Optional[Dict[str, Any]] = None,
     negative_prompt: str = "",
     model: str = "",
     steps: int = 4,
@@ -122,8 +123,10 @@ def generate_image(
     log.debug("task=%s using CLI: %s", task_id[:8], cli)
 
     return _run_cli(
+        task_id=task_id,
         cli=cli,
         prompt=prompt,
+        process_registry=process_registry,
         task_id=task_id,
         output_path=output_path,
         negative_prompt=negative_prompt,
@@ -143,10 +146,11 @@ def generate_image(
 
 
 def _run_cli(
+    task_id: str,
     cli: str,
     prompt: str,
-    task_id: str,
     output_path: str,
+    process_registry: Optional[Dict[str, Any]] = None,
     negative_prompt: str = "",
     model: str = "",
     steps: int = 4,
@@ -195,6 +199,8 @@ def _run_cli(
             stderr=subprocess.PIPE,
             text=True,
         )
+        if process_registry is not None:
+            process_registry[task_id] = process
 
         if process_holder is not None:
             process_holder["process"] = process
@@ -212,6 +218,8 @@ def _run_cli(
                 on_progress(task_id, line, step_count, steps, elapsed)
 
         process.wait()
+        if process_registry is not None:
+            process_registry.pop(task_id, None)
 
         if process.returncode != 0:
             error = process.stderr.read()
