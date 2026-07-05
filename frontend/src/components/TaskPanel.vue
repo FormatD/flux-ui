@@ -21,15 +21,17 @@
           </el-tag>
           <span class="task-prompt">{{ truncate(task.prompt, 30) }}</span>
         </div>
+        <div class="task-meta" v-if="task.queued_at">
+          <span class="task-time">Start {{ formatTime(task.queued_at) }}</span>
+          <span class="task-duration" v-if="task.elapsed">{{ formatDuration(task.elapsed) }}</span>
+        </div>
         <div class="task-progress" v-if="task.status === 'running'">
           <el-progress
             :percentage="task.progress"
             :stroke-width="4"
-            :show-text="false"
+            :show-text="true"
+            :format="() => task.current_step + '/' + task.total_steps"
           />
-          <span class="task-steps" v-if="task.total_steps">
-            {{ task.current_step }}/{{ task.total_steps }}
-          </span>
         </div>
         <div class="task-actions" v-if="task.status === 'waiting' || task.status === 'running'">
           <el-button
@@ -60,6 +62,20 @@ function statusType(status) {
 
 function truncate(str, len) {
   return str?.length > len ? str.slice(0, len) + '...' : str
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return ''
+  const d = new Date(timestamp * 1000)
+  return d.toLocaleTimeString()
+}
+
+function formatDuration(seconds) {
+  if (!seconds && seconds !== 0) return ''
+  if (seconds < 60) return seconds.toFixed(1) + 's'
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return m + 'm ' + s + 's'
 }
 
 let pollTimer = null
@@ -128,6 +144,15 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .task-progress {
   display: flex;
   align-items: center;
@@ -136,12 +161,6 @@ onUnmounted(() => {
 
 .task-progress .el-progress {
   flex: 1;
-}
-
-.task-steps {
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
 }
 
 .task-actions {

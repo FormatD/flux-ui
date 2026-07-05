@@ -49,6 +49,8 @@ class TaskQueue:
                 "total_steps": 0,
                 "current_step": 0,
                 "elapsed": 0.0,
+                "queued_at": time.time(),
+                "started_at": None,
             }
             self._queue.append(task_id)
 
@@ -67,19 +69,14 @@ class TaskQueue:
                     _update_task_status(task_id, "cancelled")
                     log.info("task %s cancelled", task_id[:8])
                     return True
-        return False
-
     def cancel_all(self):
         with self._lock:
-            count = 0
-            for task_id in list(self._tasks.keys()):
-                task = self._tasks[task_id]
+            for task_id, task in list(self._tasks.items()):
                 if task["status"] in ("waiting", "running"):
-                    task["status"] = "cancelled"
                     _update_task_status(task_id, "cancelled")
-                    count += 1
-            self._queue.clear()
-            log.info("cancelled %s tasks, queue cleared", count)
+                del self._tasks[task_id]
+            self._current_task = None
+            log.info("clear-all: removed all tasks from queue")
 
     def get_task(self, task_id: str) -> Optional[dict]:
         with self._lock:
@@ -87,7 +84,7 @@ class TaskQueue:
 
     def get_all_tasks(self) -> list:
         with self._lock:
-            return [
+            tasks = [
                 {
                     "task_id": t["id"],
                     "type": t["data"].get("type", "text2img"),
@@ -97,10 +94,13 @@ class TaskQueue:
                     "current_step": t["current_step"],
                     "elapsed": t["elapsed"],
                     "prompt": t["data"].get("prompt", ""),
+                    "queued_at": t.get("queued_at"),
+                    "started_at": t.get("started_at"),
                 }
                 for t in self._tasks.values()
             ]
-
+            tasks.sort(key=lambda t: t.get("queued_at", 0), reverse=True)
+            return tasks
     def retry_task(self, task_id: str) -> Optional[str]:
         with self._lock:
             if task_id in self._tasks:
@@ -117,6 +117,8 @@ class TaskQueue:
                         "total_steps": 0,
                         "current_step": 0,
                         "elapsed": 0.0,
+                        "queued_at": time.time(),
+                        "started_at": None,
                     }
                     self._queue.append(new_id)
                     _save_task_to_db(new_id, new_data, "waiting")
@@ -139,6 +141,7 @@ class TaskQueue:
             with self._lock:
                 if task_id in self._tasks:
                     self._tasks[task_id]["status"] = "running"
+                    self._tasks[task_id]["started_at"] = time.time()
                 _update_task_status(task_id, "running")
 
             log.info("task %s starting...", task_id[:8])

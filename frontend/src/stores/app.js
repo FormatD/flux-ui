@@ -108,8 +108,8 @@ export const useAppStore = defineStore('app', () => {
   async function clearQueue() {
     try {
       await api.post('/api/tasks/cancel-all')
+      tasks.value = []
       ElMessage.success('Queue cleared')
-      await fetchTasks()
     } catch (e) {
       ElMessage.error('Failed to clear queue')
     }
