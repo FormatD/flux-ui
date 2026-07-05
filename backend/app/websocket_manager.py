@@ -53,6 +53,31 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def scan_progress_callback(task_id: str, phase_or_model: str, message: str, current: int, total: int, elapsed: float):
+    """Broadcast scan progress via WebSocket. Reuses model_scanner's callback signature.
+
+    The callback from model_scanner passes (model_name, message, current, total, elapsed).
+    We repack it with type="scan_progress" so the frontend can distinguish from generation progress.
+    """
+    pct = int((current / max(total, 1)) * 100)
+    coro = manager.broadcast({
+        "type": "scan_progress",
+        "task_id": task_id,
+        "phase_or_model": phase_or_model,
+        "message": message,
+        "current_step": current,
+        "total_steps": total,
+        "elapsed": round(elapsed, 1),
+        "percent": min(pct, 100),
+    })
+    try:
+        loop = manager._loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+    except Exception as e:
+        log.warning("scan progress broadcast failed: %s", e)
+
+
 def progress_callback(task_id: str, message: str, current: int, total: int, elapsed: float):
     percent = int((current / max(total, 1)) * 100)
     coro = manager.broadcast({

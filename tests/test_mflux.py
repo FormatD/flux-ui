@@ -261,13 +261,24 @@ def test_api_img2img():
 
 def test_api_model_scan():
     print("\n[Model Scan]")
-    st, _ = api_post("/api/models/scan", {})
-    report("Scan models", st == 200)
+    st, data = api_post("/api/models/scan", {})
+    report("Scan models (async)", st == 200 and data.get("task_id") and data.get("status") == "scanning",
+           f"status={st} data={data}")
+
+    if st == 200 and data.get("task_id"):
+        task_id = data["task_id"]
+        # Wait for scan to complete in background (up to 30s)
+        for i in range(30):
+            time.sleep(1)
+            st2, models = api_get("/api/models")
+            if st2 == 200 and isinstance(models, list) and len(models) >= 0:
+                break
+
+    # Now list models after scan should have completed
     st, data = api_get("/api/models")
     report("List models", st == 200 and isinstance(data, list))
     if data:
         report(f"  found {len(data)} models", True)
-        # Try setting a model as default
         m = data[0]
         st, _ = api_post(f"/api/models/{m['id']}/default", {})
         report("Set default model", st == 200)
