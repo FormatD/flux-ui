@@ -101,7 +101,6 @@ def generate_image(
 
     model_name = (model or DEFAULT_MODEL).strip()
     resolved = _resolve_model_path(model_name)
-    steps = max(steps, 2)
     is_klein = "klein" in (resolved or model_name).lower()
 
     _check_disk_space(OUTPUT_DIR)
