@@ -51,8 +51,8 @@ async def image_to_image(req: Img2ImgRequest, _limiter=Depends(rate_limiter)):
     seed = req.seed if req.seed is not None else random.randint(0, 2147483647)
 
     log.info(
-        "img2img queued | prompt=%.50s model=%s strength=%s seed=%s image=%s",
-        req.prompt, req.model or "default", req.strength, seed, req.image_path,
+        "img2img queued | prompt=%.50s model=%s strength=%s seed=%s size=%sx%s image=%s",
+        req.prompt, req.model or "default", req.strength, seed, req.width, req.height, req.image_path,
     )
 
     task_data = {
@@ -66,8 +66,8 @@ async def image_to_image(req: Img2ImgRequest, _limiter=Depends(rate_limiter)):
             "seed": seed,
             "strength": req.strength,
             "image_path": req.image_path,
-            "width": 1024,
-            "height": 1024,
+            "width": req.width,
+            "height": req.height,
         },
     }
 

@@ -169,11 +169,11 @@ async function generate() {
 
   try {
     const res = await api.post('/api/generate/img2img', {
-      prompt: prompt.value,
-      model: params.model,
-      steps: params.steps,
-      guidance: params.guidance,
-      seed: params.seed || undefined,
+     prompt: prompt.value,
+     model: params.model,
+     steps: params.steps,
+     guidance: params.guidance,
+     seed: params.seed || undefined,
       strength: strength.value,
       image_path: uploadedPath.value,
     })
@@ -274,3 +274,5 @@ async function generate() {
   overflow: hidden;
 }
 </style>
+      width: params.width,
+      height: params.height,
