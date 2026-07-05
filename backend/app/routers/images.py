@@ -9,6 +9,14 @@ from ..database import get_db
 from ..models import ImageRecord
 from ..schemas.schemas import ImageRecordResponse, ImageUpdate
 
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
+
+
+def _resolve_path(url_path: str) -> str:
+    """Convert a URL path (e.g. /api/output/xxx.png) to a local filesystem path."""
+    return os.path.join(OUTPUT_DIR, os.path.basename(url_path))
+
+
 router = APIRouter(prefix="/api/images", tags=["images"])
 log = get_logger("api.images")
 
@@ -65,10 +73,14 @@ async def delete_image(image_id: int, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    if record.image_path and os.path.exists(record.image_path):
-        os.remove(record.image_path)
-    if record.thumbnail_path and os.path.exists(record.thumbnail_path):
-        os.remove(record.thumbnail_path)
+    if record.image_path:
+        path = _resolve_path(record.image_path)
+        if os.path.exists(path):
+            os.remove(path)
+    if record.thumbnail_path:
+        path = _resolve_path(record.thumbnail_path)
+        if os.path.exists(path):
+            os.remove(path)
 
     db.delete(record)
     db.commit()
@@ -80,10 +92,14 @@ async def delete_image(image_id: int, db: Session = Depends(get_db)):
 async def batch_delete(ids: list[int] = Body(...), db: Session = Depends(get_db)):
     records = db.query(ImageRecord).filter(ImageRecord.id.in_(ids)).all()
     for record in records:
-        if record.image_path and os.path.exists(record.image_path):
-            os.remove(record.image_path)
-        if record.thumbnail_path and os.path.exists(record.thumbnail_path):
-            os.remove(record.thumbnail_path)
+        if record.image_path:
+            path = _resolve_path(record.image_path)
+            if os.path.exists(path):
+                os.remove(path)
+        if record.thumbnail_path:
+            path = _resolve_path(record.thumbnail_path)
+            if os.path.exists(path):
+                os.remove(path)
         db.delete(record)
     db.commit()
     log.info("batch deleted %s images", len(records))
