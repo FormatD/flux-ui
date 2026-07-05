@@ -97,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { VideoPlay, Delete, MagicStick } from '@element-plus/icons-vue'
 import api from '@/api'
@@ -161,33 +161,8 @@ async function generate() {
     ElMessage.success('Task queued')
 
     appStore.currentTaskId = res.data.task_id
-
-    // Poll for completion
-    const poll = setInterval(async () => {
-      try {
-        const r = await api.get(`/api/tasks/${res.data.task_id}`)
-        const task = r.data
-        if (task.status === 'completed') {
-          clearInterval(poll)
-          generating.value = false
-          appStore.fetchTasks()
-          if (task.result_path) {
-            resultImage.value = task.result_path
-            ElMessage.success('Image generated!')
-          }
-        } else if (task.status === 'failed') {
-          clearInterval(poll)
-          generating.value = false
-          ElMessage.error(`Generation failed: ${task.error || 'Unknown error'}`)
-        }
-      } catch (e) {
-        // ignore polling errors
-      }
-    }, 2000)
   } catch (e) {
     ElMessage.error('Failed to queue task')
-  } finally {
-    generating.value = false
   }
 }
 
@@ -216,6 +191,27 @@ async function applyEnhance() {
     enhancing.value = false
   }
 }
+
+// Watch for current task completion/failure via WebSocket-driven store updates
+watch(() => appStore.tasks, (newTasks) => {
+  if (!appStore.currentTaskId) return
+  const task = newTasks.find(t => t.task_id === appStore.currentTaskId)
+  if (!task) return
+
+  if (task.status === 'completed') {
+    generating.value = false
+    if (task.result_path) {
+      resultImage.value = task.result_path
+      ElMessage.success('Image generated!')
+    }
+    appStore.currentTaskId = ''
+  } else if (task.status === 'failed') {
+    generating.value = false
+    ElMessage.error(`Generation failed: ${task.error || 'Unknown error'}`)
+    appStore.currentTaskId = ''
+  }
+}, { deep: true })
+
 </script>
 
 <style scoped>
