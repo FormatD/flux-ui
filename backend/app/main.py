@@ -117,13 +117,39 @@ async def websocket_endpoint(ws: WebSocket):
     client = ws.client
     logger.info(f"WebSocket connection from {client}")
     await manager.connect(ws)
+
+    HEARTBEAT_INTERVAL = 30
+    HEARTBEAT_TIMEOUT = 60
+    last_pong = time.monotonic()
+
+    async def heartbeat_loop():
+        nonlocal last_pong
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            try:
+                await manager.send_to(ws, {"type": "ping"})
+                if time.monotonic() - last_pong > HEARTBEAT_TIMEOUT:
+                    logger.info(f"Heartbeat timeout for {client}, closing")
+                    try:
+                        await ws.close()
+                    except Exception:
+                        pass
+                    break
+            except Exception:
+                break
+
     try:
+        heartbeat_task = asyncio.create_task(heartbeat_loop())
+
         while True:
             data = await ws.receive_text()
             msg = json.loads(data)
             msg_type = msg.get("type", "")
             if msg_type == "ping":
                 await manager.send_to(ws, {"type": "pong"})
+                last_pong = time.monotonic()
+            elif msg_type == "pong":
+                last_pong = time.monotonic()
             elif msg_type:
                 logger.debug(f"WS message from {client}: {msg_type}")
             await asyncio.sleep(0.01)
@@ -133,6 +159,8 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception as e:
         logger.warning(f"WebSocket error ({client}): {e}")
         manager.disconnect(ws)
+    finally:
+        heartbeat_task.cancel()
 
 
 if __name__ == "__main__":
