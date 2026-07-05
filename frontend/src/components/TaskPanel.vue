@@ -49,7 +49,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
@@ -78,14 +78,8 @@ function formatDuration(seconds) {
   return m + 'm ' + s + 's'
 }
 
-let pollTimer = null
 onMounted(() => {
   appStore.fetchTasks()
-  pollTimer = setInterval(() => appStore.fetchTasks(), 2000)
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 

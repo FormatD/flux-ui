@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -12,6 +12,21 @@ export const useAppStore = defineStore('app', () => {
 
   let ws = null
   let reconnectTimer = null
+  let fallbackTimer = null
+
+  function startFallbackPolling() {
+    if (fallbackTimer) return
+    fallbackTimer = setInterval(() => {
+      fetchTasks()
+    }, 30000)
+  }
+
+  function stopFallbackPolling() {
+    if (fallbackTimer) {
+      clearInterval(fallbackTimer)
+      fallbackTimer = null
+    }
+  }
 
   function toggleDark() {
     darkMode.value = !darkMode.value
@@ -116,6 +131,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function disconnectWebSocket() {
+    stopFallbackPolling()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -125,6 +141,9 @@ export const useAppStore = defineStore('app', () => {
       ws = null
     }
   }
+
+  // Start 30s fallback polling as safety net (WebSocket is primary)
+  startFallbackPolling()
 
   return {
     darkMode,
@@ -139,6 +158,8 @@ export const useAppStore = defineStore('app', () => {
     fetchTasks,
     cancelTask,
     clearQueue,
+    startFallbackPolling,
+    stopFallbackPolling,
   }
 }, {
   persist: {
