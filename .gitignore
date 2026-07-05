@@ -25,3 +25,4 @@ backend/.env
 .codex/
 .agents/
 .vscode/
+data/
