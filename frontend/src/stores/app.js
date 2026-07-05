@@ -13,6 +13,7 @@ export const useAppStore = defineStore('app', () => {
 
   let ws = null
   let reconnectTimer = null
+  let pingInterval = null
 
   function toggleDark() {
     darkMode.value = !darkMode.value
@@ -28,6 +29,11 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function connectWebSocket() {
+    // Prevent duplicate connections
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      return
+    }
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${location.host}/ws`
 
@@ -37,27 +43,50 @@ export const useAppStore = defineStore('app', () => {
       ws.onopen = () => {
         wsConnected.value = true
         ws.send(JSON.stringify({ type: 'subscribe' }))
+        startHeartbeat()
       }
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
+          // Respond to server heartbeat
+          if (data.type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }))
+            return
+          }
           handleMessage(data)
         } catch (e) {
           console.error('WS parse error:', e)
         }
       }
 
-      ws.onclose = () => {
-        wsConnected.value = false
-        scheduleReconnect()
-      }
+     ws.onclose = () => {
+       wsConnected.value = false
+        stopHeartbeat()
+       scheduleReconnect()
+     }
 
       ws.onerror = () => {
         wsConnected.value = false
       }
     } catch (e) {
       scheduleReconnect()
+    }
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat()
+    pingInterval = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }))
+      }
+    }, 25000)
+  }
+
+  function stopHeartbeat() {
+    if (pingInterval) {
+      clearInterval(pingInterval)
+      pingInterval = null
     }
   }
 
@@ -145,6 +174,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function disconnectWebSocket() {
+    stopHeartbeat()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
