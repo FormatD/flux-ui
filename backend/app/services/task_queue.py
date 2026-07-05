@@ -1,5 +1,6 @@
 import json
 import random
+import sqlite3
 import threading
 import time
 import uuid
@@ -254,36 +255,51 @@ class TaskQueue:
 
 
 def _save_task_to_db(task_id: str, task_data: dict, status: str):
-    try:
-        db = SessionLocal()
-        record = TaskRecord(
-            task_id=task_id,
-            type=task_data.get("type", "text2img"),
-            status=status,
-            prompt=task_data.get("params", {}).get("prompt", ""),
-            params=json.dumps(task_data),
-        )
-        db.add(record)
-        db.commit()
-        db.close()
-    except Exception as e:
-        log.error("Failed to save task %s to DB: %s", task_id[:8], e)
-
+    for attempt in range(3):
+        try:
+            db = SessionLocal()
+            record = TaskRecord(
+                task_id=task_id,
+                type=task_data.get("type", "text2img"),
+                status=status,
+                prompt=task_data.get("params", {}).get("prompt", ""),
+                params=json.dumps(task_data),
+            )
+            db.add(record)
+            db.commit()
+            db.close()
+            return
+        except sqlite3.OperationalError as e:
+            db.close()
+            log.warning("task %s DB write conflict (attempt %s/3): %s", task_id[:8], attempt + 1, e)
+            time.sleep(0.1 * (2 ** attempt))
+        except Exception as e:
+            db.close()
+            log.error("Failed to save task %s to DB: %s", task_id[:8], e)
+            return
 
 def _update_task_status(task_id: str, status: str, error: str = "", result_path: str = ""):
-    try:
-        db = SessionLocal()
-        record = db.query(TaskRecord).filter(TaskRecord.task_id == task_id).first()
-        if record:
-            record.status = status
-            if error:
-                record.error = error
-            if result_path:
-                record.result_path = result_path
-            db.commit()
-        db.close()
-    except Exception as e:
-        log.error("Failed to update task %s status: %s", task_id[:8], e)
+    for attempt in range(3):
+        try:
+            db = SessionLocal()
+            record = db.query(TaskRecord).filter(TaskRecord.task_id == task_id).first()
+            if record:
+                record.status = status
+                if error:
+                    record.error = error
+                if result_path:
+                    record.result_path = result_path
+                db.commit()
+            db.close()
+            return
+        except sqlite3.OperationalError as e:
+            db.close()
+            log.warning("task %s DB write conflict (attempt %s/3): %s", task_id[:8], attempt + 1, e)
+            time.sleep(0.1 * (2 ** attempt))
+        except Exception as e:
+            db.close()
+            log.error("Failed to update task %s status: %s", task_id[:8], e)
+            return
 
 
 task_queue = TaskQueue()
