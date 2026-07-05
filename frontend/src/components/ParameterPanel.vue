@@ -25,7 +25,7 @@
       <el-form-item label="Steps">
         <el-slider
           v-model="params.steps"
-          :min="1"
+          :min="2"
           :max="50"
           :step="1"
           show-input

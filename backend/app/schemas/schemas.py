@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -7,7 +7,7 @@ class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: str = ""
     model: str = ""
-    steps: int = 4
+    steps: int = Field(default=4, ge=2)
     guidance: float = 3.5
     seed: Optional[int] = None
     width: int = 1024
@@ -19,7 +19,7 @@ class Img2ImgRequest(BaseModel):
     prompt: str
     negative_prompt: str = ""
     model: str = ""
-    steps: int = 4
+    steps: int = Field(default=4, ge=2)
     guidance: float = 3.5
     seed: Optional[int] = None
     strength: float = 0.8
