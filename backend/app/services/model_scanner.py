@@ -1,7 +1,9 @@
 import os
 import re
 import glob
-from typing import List, Dict
+import threading
+import time
+from typing import List, Dict, Optional, Callable
 
 from ..logger import get_logger
 
@@ -12,6 +14,7 @@ SCAN_DIRS = [
     os.path.expanduser("~/Models"),
     os.path.expanduser("~/Downloads/models"),
 ]
+SCAN_DEFAULT_TIMEOUT = 300
 
 MODEL_PATTERNS = [
     "**/*.safetensors",
@@ -25,14 +28,44 @@ MODEL_PATTERNS = [
 HF_MODEL_PREFIX = "models--"
 
 
-def _scan_hf_cache() -> List[Dict]:
+def _check_timeout(start_time: float, timeout: float, cancel_event: Optional[threading.Event] = None) -> bool:
+    if cancel_event and cancel_event.is_set():
+        return True
+    if timeout > 0 and time.time() - start_time >= timeout:
+        return True
+    return False
+
+
+def _count_hf_models() -> int:
+    if not os.path.isdir(HF_CACHE_DIR):
+        return 0
+    count = 0
+    for entry in os.listdir(HF_CACHE_DIR):
+        if entry.startswith(HF_MODEL_PREFIX) and os.path.isdir(os.path.join(HF_CACHE_DIR, entry)):
+            snap_dir = os.path.join(HF_CACHE_DIR, entry, "snapshots")
+            if os.path.isdir(snap_dir) and os.listdir(snap_dir):
+                count += 1
+    return count
+
+
+def _scan_hf_cache(progress_callback: Optional[Callable] = None,
+                   start_time: float = 0,
+                   timeout: float = 300,
+                   cancel_event: Optional[threading.Event] = None) -> List[Dict]:
     found = []
     if not os.path.isdir(HF_CACHE_DIR):
         return found
 
+    total_models = _count_hf_models()
+    model_idx = 0
+
     for entry in os.listdir(HF_CACHE_DIR):
         if not entry.startswith(HF_MODEL_PREFIX):
             continue
+
+        if _check_timeout(start_time, timeout, cancel_event):
+            log.warning("HF cache scan timed out after %d models", model_idx)
+            break
 
         repo_dir = os.path.join(HF_CACHE_DIR, entry)
         if not os.path.isdir(repo_dir):
@@ -79,7 +112,13 @@ def _scan_hf_cache() -> List[Dict]:
 
             if safetensors_count == 0:
                 log.debug("  skip %s (no safetensors)", repo_id)
+                model_idx += 1
+                if progress_callback:
+                    progress_callback(repo_id, f"Skipping {name} (no .safetensors)",
+                                      model_idx, total_models)
                 continue
+
+            model_idx += 1
 
             found.append({
                 "name": name,
@@ -91,6 +130,10 @@ def _scan_hf_cache() -> List[Dict]:
                 "file_count": file_count,
                 "last_modified": os.path.getmtime(snap_path),
             })
+
+            if progress_callback:
+                progress_callback(repo_id, f"Found {name}", model_idx, total_models)
+
             log.debug("  HF model: %s (%s, %s files, %s)",
                       repo_id, quantization, safetensors_count,
                       _format_size(total_size))
@@ -98,7 +141,10 @@ def _scan_hf_cache() -> List[Dict]:
     return found
 
 
-def _scan_other_dirs() -> List[Dict]:
+def _scan_other_dirs(progress_callback: Optional[Callable] = None,
+                     start_time: float = 0,
+                     timeout: float = 300,
+                     cancel_event: Optional[threading.Event] = None) -> List[Dict]:
     found = []
     seen_paths = set()
 
@@ -107,9 +153,17 @@ def _scan_other_dirs() -> List[Dict]:
             log.debug("scan dir not found: %s", scan_dir)
             continue
 
+        if _check_timeout(start_time, timeout, cancel_event):
+            log.warning("Other dirs scan timed out")
+            break
+
         log.debug("scanning: %s", scan_dir)
         for pattern in MODEL_PATTERNS:
+            if _check_timeout(start_time, timeout, cancel_event):
+                break
             for filepath in glob.glob(os.path.join(scan_dir, pattern), recursive=True):
+                if _check_timeout(start_time, timeout, cancel_event):
+                    break
                 if filepath in seen_paths:
                     continue
                 seen_paths.add(filepath)
@@ -156,12 +210,36 @@ def _format_size(bytes_val: int) -> str:
     return f"{bytes_val:.1f}PB"
 
 
-def scan_models() -> List[Dict]:
-    log.info("Starting model scan...")
-    found = _scan_hf_cache() + _scan_other_dirs()
-    log.info("Model scan complete: %s models found", len(found))
+def scan_models(progress_callback: Optional[Callable] = None,
+                timeout: float = 300,
+                cancel_event: Optional[threading.Event] = None) -> List[Dict]:
+    log.info("Starting model scan (timeout=%ss)...", timeout)
+    start_time = time.time()
+
+    if progress_callback:
+        progress_callback("_phase", "Scanning HuggingFace cache...", 0, 3, 0)
+
+    found = _scan_hf_cache(progress_callback, start_time, timeout, cancel_event)
+
+    if not _check_timeout(start_time, timeout, cancel_event):
+        if progress_callback:
+            progress_callback("_phase", "Scanning local directories...", 1, 3, 0)
+        found += _scan_other_dirs(progress_callback, start_time, timeout, cancel_event)
+
+    elapsed = time.time() - start_time
+    log.info("Model scan complete: %s models found in %.1fs", len(found), elapsed)
+
     for m in found:
         log.info("  %s | %s | %s | %s",
                  m["name"], m["repo_id"],
                  m["quantization"], _format_size(m["size_bytes"]))
+
+    if _check_timeout(start_time, timeout, cancel_event):
+        msg = f"Scan timed out after {elapsed:.0f}s, partial results: {len(found)} models"
+        if progress_callback:
+            progress_callback("_phase", msg, 3, 3, elapsed)
+        log.warning("Model scan timed out after %.1fs, returning %s partial results", elapsed, len(found))
+    elif progress_callback:
+        progress_callback("_phase", f"Scan complete: {len(found)} models found", 3, 3, elapsed)
+
     return found

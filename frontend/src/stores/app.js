@@ -9,6 +9,7 @@ export const useAppStore = defineStore('app', () => {
   const currentTaskId = ref('')
   const tasks = ref([])
   const wsConnected = ref(false)
+  const scanProgress = ref(null)  // { task_id, message, percent, current_step, total_steps, elapsed }
 
   let ws = null
   let reconnectTimer = null
@@ -73,7 +74,35 @@ export const useAppStore = defineStore('app', () => {
       fetchTasks()
     } else if (data.type === 'task_completed') {
       fetchTasks()
+    } else if (data.type === 'scan_progress') {
+      handleScanProgress(data)
     }
+  }
+
+  function handleScanProgress(data) {
+    scanProgress.value = {
+      task_id: data.task_id,
+      phase_or_model: data.phase_or_model,
+      message: data.message,
+      percent: data.percent || 0,
+      current_step: data.current_step || 0,
+      total_steps: data.total_steps || 0,
+      elapsed: data.elapsed || 0,
+    }
+    // Clear scan progress on completion or error
+    if (data.phase_or_model === '_done' || data.phase_or_model === '_error') {
+      if (data.phase_or_model === '_error') {
+        ElMessage.error(data.message || 'Scan failed')
+      }
+      // Keep the final state for 3s so the UI can show completion, then clear
+      setTimeout(() => {
+        scanProgress.value = null
+      }, 3000)
+    }
+  }
+
+  function clearScanProgress() {
+    scanProgress.value = null
   }
 
   function updateTaskProgress(data) {
@@ -132,6 +161,7 @@ export const useAppStore = defineStore('app', () => {
     currentTaskId,
     tasks,
     wsConnected,
+    scanProgress,
     toggleDark,
     applyTheme,
     connectWebSocket,
@@ -139,6 +169,7 @@ export const useAppStore = defineStore('app', () => {
     fetchTasks,
     cancelTask,
     clearQueue,
+    clearScanProgress,
   }
 }, {
   persist: {

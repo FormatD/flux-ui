@@ -1,3 +1,6 @@
+import uuid
+import threading
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -7,6 +10,7 @@ from ..database import get_db
 from ..models import ModelRecord
 from ..schemas.schemas import ModelResponse
 from ..services.model_scanner import scan_models
+from ..websocket_manager import manager, scan_progress_callback
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 log = get_logger("api.models")
@@ -21,8 +25,71 @@ async def list_models(db: Session = Depends(get_db)):
 
 @router.post("/scan")
 async def scan_local_models(db: Session = Depends(get_db)):
-    log.info("Starting model scan...")
+    task_id = str(uuid.uuid4())
+    log.info("Starting async model scan (task=%s)...", task_id)
 
+    # Extract DB connection info for background thread
+    def _run_scan(task_id: str):
+        from ..database import SessionLocal
+        from ..models import ModelRecord as MR
+        log.info("Background scan thread started (task=%s)", task_id)
+
+        def _progress(model_name, message, current, total, elapsed):
+            scan_progress_callback(task_id, model_name, message, current, total, elapsed)
+
+        scan_start = time.time()
+        try:
+            found = scan_models(progress_callback=_progress, timeout=300)
+            elapsed = time.time() - scan_start
+            log.info("Background scan found %d models (task=%s)", len(found), task_id)
+
+            bdb = SessionLocal()
+            try:
+                bdb.query(MR).delete()
+                added = 0
+                for item in found:
+                    record = MR(
+                        name=item["name"],
+                        path=item.get("repo_id", item["path"]),
+                        model_type=item["model_type"],
+                        quantization=item["quantization"],
+                        size_bytes=item["size_bytes"],
+                    )
+                    bdb.add(record)
+                    added += 1
+                bdb.commit()
+                log.info("Background scan saved %d models (task=%s)", added, task_id)
+            finally:
+                bdb.close()
+
+            scan_progress_callback(task_id, "_done", f"Scan complete: {len(found)} models",
+                                   100, 100, elapsed)
+        except Exception as e:
+            log.error("Background scan failed (task=%s): %s", task_id, e)
+            scan_progress_callback(task_id, "_error", f"Scan failed: {e}",
+                                   100, 100, time.time() - scan_start)
+
+    thread = threading.Thread(target=_run_scan, args=(task_id,), daemon=True)
+    thread.start()
+
+    return {"task_id": task_id, "status": "scanning"}
+
+
+@router.get("/scan-result/{task_id}")
+async def get_scan_result(task_id: str, db: Session = Depends(get_db)):
+    """Legacy sync scan kept for backward-compatible querying."""
+    records = db.query(ModelRecord).order_by(desc(ModelRecord.create_time)).all()
+    return {
+        "task_id": task_id,
+        "scanned": len(records),
+        "models": records,
+    }
+
+
+@router.post("/scan-sync", include_in_schema=False)
+async def scan_local_models_sync(db: Session = Depends(get_db)):
+    """Original synchronous scan endpoint, kept for backward compatibility."""
+    log.info("Running sync model scan...")
     db.query(ModelRecord).delete()
     db.commit()
     log.info("Cleared old model records")
