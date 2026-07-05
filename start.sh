@@ -10,8 +10,10 @@ if [ ! -d ".venv" ]; then
 fi
 source .venv/bin/activate
 uv pip install -r requirements.txt -q
-echo "Backend starting on http://localhost:8765"
-uvicorn app.main:app --host 0.0.0.0 --port 8765 --reload &
+HOST="${HOST:-127.0.0.1}"
+echo "Backend starting on http://${HOST}:8765"
+echo "  (set HOST=0.0.0.0 env var for LAN access)"
+uvicorn app.main:app --host $HOST --port 8765 --reload &
 BACKEND_PID=$!
 
 # Start frontend
