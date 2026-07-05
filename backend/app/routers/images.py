@@ -7,10 +7,18 @@ from typing import Optional
 from ..logger import get_logger
 from ..database import get_db
 from ..models import ImageRecord
+from ..services.generator import OUTPUT_DIR
 from ..schemas.schemas import ImageRecordResponse, ImageUpdate
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 log = get_logger("api.images")
+
+
+def _resolve_fs_path(db_path: str) -> str:
+    """Convert URL path (e.g. /api/output/xxx.png) to real filesystem path."""
+    if db_path.startswith("/api/output/"):
+        return os.path.join(OUTPUT_DIR, os.path.basename(db_path))
+    return db_path
 
 
 @router.get("", response_model=list[ImageRecordResponse])
@@ -65,10 +73,12 @@ async def delete_image(image_id: int, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    if record.image_path and os.path.exists(record.image_path):
-        os.remove(record.image_path)
-    if record.thumbnail_path and os.path.exists(record.thumbnail_path):
-        os.remove(record.thumbnail_path)
+    fs_image_path = _resolve_fs_path(record.image_path) if record.image_path else None
+    if fs_image_path and os.path.exists(fs_image_path):
+        os.remove(fs_image_path)
+    fs_thumb_path = _resolve_fs_path(record.thumbnail_path) if record.thumbnail_path else None
+    if fs_thumb_path and os.path.exists(fs_thumb_path):
+        os.remove(fs_thumb_path)
 
     db.delete(record)
     db.commit()
@@ -80,10 +90,12 @@ async def delete_image(image_id: int, db: Session = Depends(get_db)):
 async def batch_delete(ids: list[int] = Body(...), db: Session = Depends(get_db)):
     records = db.query(ImageRecord).filter(ImageRecord.id.in_(ids)).all()
     for record in records:
-        if record.image_path and os.path.exists(record.image_path):
-            os.remove(record.image_path)
-        if record.thumbnail_path and os.path.exists(record.thumbnail_path):
-            os.remove(record.thumbnail_path)
+        fs_image_path = _resolve_fs_path(record.image_path) if record.image_path else None
+        if fs_image_path and os.path.exists(fs_image_path):
+            os.remove(fs_image_path)
+        fs_thumb_path = _resolve_fs_path(record.thumbnail_path) if record.thumbnail_path else None
+        if fs_thumb_path and os.path.exists(fs_thumb_path):
+            os.remove(fs_thumb_path)
         db.delete(record)
     db.commit()
     log.info("batch deleted %s images", len(records))

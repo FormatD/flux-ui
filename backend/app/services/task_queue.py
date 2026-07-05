@@ -13,6 +13,7 @@ from ..logger import get_logger
 from ..database import SessionLocal
 from ..models import TaskRecord
 from ..services.generator import generate_image
+from ..services.generator import terminate_process
 
 log = get_logger("task_queue")
 
@@ -64,15 +65,20 @@ class TaskQueue:
         with self._lock:
             if task_id in self._tasks:
                 task = self._tasks[task_id]
+                was_running = task["status"] == "running"
                 if task["status"] in ("waiting", "running"):
                     task["status"] = "cancelled"
                     _update_task_status(task_id, "cancelled")
                     log.info("task %s cancelled", task_id[:8])
+                    if was_running:
+                        terminate_process(task_id)
                     return True
     def cancel_all(self):
         with self._lock:
             for task_id, task in list(self._tasks.items()):
                 if task["status"] in ("waiting", "running"):
+                    if task["status"] == "running":
+                        terminate_process(task_id)
                     _update_task_status(task_id, "cancelled")
                 del self._tasks[task_id]
             self._current_task = None
@@ -162,9 +168,10 @@ class TaskQueue:
                     log.error("task %s failed after %.1fs: %s", task_id[:8], elapsed, error_msg[:200])
                     with self._lock:
                         if task_id in self._tasks:
-                            self._tasks[task_id]["status"] = "failed"
-                            self._tasks[task_id]["error"] = error_msg
-                        _update_task_status(task_id, "failed", error=error_msg)
+                            if self._tasks[task_id]["status"] != "cancelled":
+                                self._tasks[task_id]["status"] = "failed"
+                                self._tasks[task_id]["error"] = error_msg
+                                _update_task_status(task_id, "failed", error=error_msg)
                     if self._broadcast_callback:
                         self._broadcast_callback({
                             "type": "task_error",

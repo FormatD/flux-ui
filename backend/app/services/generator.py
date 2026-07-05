@@ -4,7 +4,7 @@ import random
 import signal
 import subprocess
 import shutil
-from typing import Optional, Callable
+from typing import Dict, Optional, Callable
 from datetime import datetime
 
 from ..logger import get_logger
@@ -15,6 +15,9 @@ log = get_logger("generator")
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Tracks running CLI processes keyed by task_id for cancellation support
+RUNNING_PROCESSES: Dict[str, subprocess.Popen] = {}
 
 DEFAULT_MODEL = "mlx-community/flux2-klein-4b-4bit"
 CACHE_DIR = os.path.expanduser("~/.cache/huggingface/hub")
@@ -69,6 +72,20 @@ def _pick_cli(model: str) -> Optional[str]:
         if cli:
             return cli
     return _find_cli("mflux-generate-flux2") or _find_cli("mflux-generate")
+
+
+def terminate_process(task_id: str) -> bool:
+    """Send SIGTERM to the running CLI process for the given task, if any.
+    Returns True if a process was found and terminated, False otherwise."""
+    proc = RUNNING_PROCESSES.pop(task_id, None)
+    if proc:
+        try:
+            proc.terminate()
+            log.info("task=%s process %s terminated", task_id[:8], proc.pid)
+        except ProcessLookupError:
+            log.warning("task=%s process %s already exited", task_id[:8], proc.pid)
+        return True
+    return False
 
 
 def _url_path(filepath: str) -> str:
@@ -193,6 +210,7 @@ def _run_cli(
             stderr=subprocess.PIPE,
             text=True,
         )
+        RUNNING_PROCESSES[task_id] = process
 
         start_time = time.time()
         step_count = 0
@@ -249,6 +267,8 @@ def _run_cli(
     except Exception as e:
         log.error("task=%s CLI error: %s", task_id[:8], e)
         raise RuntimeError(f"Generation failed: {e}")
+    finally:
+        RUNNING_PROCESSES.pop(task_id, None)
 
     return None
 
