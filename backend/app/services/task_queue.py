@@ -19,11 +19,13 @@ log = get_logger("task_queue")
 
 
 class TaskQueue:
-    def __init__(self):
+    def __init__(self, default_timeout: int = 600):
         self._queue = deque()
         self._tasks: Dict[str, dict] = {}
         self._current_task: Optional[str] = None
         self._lock = threading.Lock()
+        self._process_holders: Dict[str, dict] = {}
+        self._default_timeout = default_timeout
         self._worker = threading.Thread(target=self._process_loop, daemon=True)
         self._running = True
         self._progress_callback: Optional[Callable] = None
@@ -52,6 +54,7 @@ class TaskQueue:
                 "elapsed": 0.0,
                 "queued_at": time.time(),
                 "started_at": None,
+                "timeout": task_data.get("timeout", self._default_timeout),
             }
             self._queue.append(task_id)
 
@@ -68,6 +71,10 @@ class TaskQueue:
                 if task["status"] in ("waiting", "running"):
                     task["status"] = "cancelled"
                     _update_task_status(task_id, "cancelled")
+                    ph = self._process_holders.pop(task_id, None)
+                    if ph and "process" in ph:
+                        log.info("task %s terminating process (cancel)", task_id[:8])
+                        ph["process"].terminate()
                     log.info("task %s cancelled", task_id[:8])
                     return True
     def cancel_all(self):
@@ -75,7 +82,11 @@ class TaskQueue:
             for task_id, task in list(self._tasks.items()):
                 if task["status"] in ("waiting", "running"):
                     _update_task_status(task_id, "cancelled")
+                    ph = self._process_holders.pop(task_id, None)
+                    if ph and "process" in ph:
+                        ph["process"].terminate()
                 del self._tasks[task_id]
+            self._process_holders.clear()
             self._current_task = None
             log.info("clear-all: removed all tasks from queue")
 
@@ -163,8 +174,11 @@ class TaskQueue:
                     log.error("task %s failed after %.1fs: %s", task_id[:8], elapsed, error_msg[:200])
                     with self._lock:
                         if task_id in self._tasks:
-                            self._tasks[task_id]["status"] = "failed"
-                            self._tasks[task_id]["error"] = error_msg
+                            # Preserve terminal status set by cancel_task or timeout timer
+                            current_status = self._tasks[task_id].get("status")
+                            if current_status not in ("cancelled", "failed", "completed"):
+                                self._tasks[task_id]["status"] = "failed"
+                                self._tasks[task_id]["error"] = error_msg
                         _update_task_status(task_id, "failed", error=error_msg)
                     if self._broadcast_callback:
                         self._broadcast_callback({
@@ -173,6 +187,8 @@ class TaskQueue:
                             "error": error_msg,
                         })
 
+            # Clean up process tracking
+            self._process_holders.pop(task_id, None)
             with self._lock:
                 self._current_task = None
 
@@ -192,6 +208,23 @@ class TaskQueue:
                     if self._progress_callback:
                         self._progress_callback(tid, msg, current_step, total_steps, elapsed)
 
+        # Create a process holder so cancel_task / timeout can find the subprocess
+        process_holder: dict = {}
+        timeout = task_data.get("timeout", self._default_timeout)
+
+        # Start a timeout timer that terminates the subprocess if it exceeds the deadline
+        def _timeout_kill():
+            ph = self._process_holders.get(task_id)
+            if ph and "process" in ph:
+                log.warning("task %s timed out after %ds, terminating", task_id[:8], timeout)
+                ph["process"].terminate()
+
+        timer = threading.Timer(timeout, _timeout_kill)
+        timer.daemon = True
+
+        self._process_holders[task_id] = process_holder
+        timer.start()
+
         try:
             if ttype == "text2img":
                 base_seed = params.get("seed") or random.randint(0, 2147483647)
@@ -210,6 +243,7 @@ class TaskQueue:
                         batch_count=params.get("batch_count", 1),
                         batch_index=i,
                         on_progress=on_progress,
+                        process_holder=process_holder,
                     )
             elif ttype == "img2img":
                 result = generate_image(
@@ -227,6 +261,7 @@ class TaskQueue:
                     strength=params.get("strength", 0.8),
                     image_path=params.get("image_path", ""),
                     on_progress=on_progress,
+                    process_holder=process_holder,
                 )
             else:
                 log.warning("task %s unknown type: %s", task_id[:8], ttype)
@@ -246,7 +281,13 @@ class TaskQueue:
                     "task_id": task_id,
                     "result_path": result,
                 })
+            # Cancel timeout timer on success
+            timer.cancel()
+            self._process_holders.pop(task_id, None)
         except Exception as e:
+            # Cancel timeout timer on failure
+            timer.cancel()
+            self._process_holders.pop(task_id, None)
             raise
 
     def stop(self):

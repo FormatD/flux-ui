@@ -91,6 +91,7 @@ def generate_image(
     on_progress: Optional[Callable] = None,
     strength: Optional[float] = None,
     image_path: Optional[str] = None,
+    process_holder: Optional[dict] = None,
 ) -> Optional[str]:
     if seed is None:
         seed = random.randint(0, 2147483647)
@@ -137,6 +138,7 @@ def generate_image(
         on_progress=on_progress,
         strength=strength,
         image_path=image_path,
+        process_holder=process_holder,
     )
 
 
@@ -157,6 +159,7 @@ def _run_cli(
     on_progress: Optional[Callable] = None,
     strength: Optional[float] = None,
     image_path: Optional[str] = None,
+    process_holder: Optional[dict] = None,
 ) -> Optional[str]:
     cmd = [cli, "--model", model]
     cmd.extend(["--prompt", prompt])
@@ -192,6 +195,9 @@ def _run_cli(
             stderr=subprocess.PIPE,
             text=True,
         )
+
+        if process_holder is not None:
+            process_holder["process"] = process
 
         start_time = time.time()
         step_count = 0
