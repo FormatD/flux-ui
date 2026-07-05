@@ -14,9 +14,9 @@ from ..logger import get_logger
 from ..database import SessionLocal
 from ..models import TaskRecord
 from ..services.generator import generate_image
+from ..services.generator import terminate_process
 
 log = get_logger("task_queue")
-
 
 class TaskQueue:
     def __init__(self, default_timeout: int = 600):
@@ -68,6 +68,7 @@ class TaskQueue:
         with self._lock:
             if task_id in self._tasks:
                 task = self._tasks[task_id]
+                was_running = task["status"] == "running"
                 if task["status"] in ("waiting", "running"):
                     task["status"] = "cancelled"
                     _update_task_status(task_id, "cancelled")
@@ -76,11 +77,15 @@ class TaskQueue:
                         log.info("task %s terminating process (cancel)", task_id[:8])
                         ph["process"].terminate()
                     log.info("task %s cancelled", task_id[:8])
+                    if was_running:
+                        terminate_process(task_id)
                     return True
     def cancel_all(self):
         with self._lock:
             for task_id, task in list(self._tasks.items()):
                 if task["status"] in ("waiting", "running"):
+                    if task["status"] == "running":
+                        terminate_process(task_id)
                     _update_task_status(task_id, "cancelled")
                     ph = self._process_holders.pop(task_id, None)
                     if ph and "process" in ph:
@@ -174,6 +179,7 @@ class TaskQueue:
                     log.error("task %s failed after %.1fs: %s", task_id[:8], elapsed, error_msg[:200])
                     with self._lock:
                         if task_id in self._tasks:
+
                             # Preserve terminal status set by cancel_task or timeout timer
                             current_status = self._tasks[task_id].get("status")
                             if current_status not in ("cancelled", "failed", "completed"):
@@ -294,7 +300,6 @@ class TaskQueue:
         log.info("Stopping task queue worker...")
         self._running = False
 
-
 def _save_task_to_db(task_id: str, task_data: dict, status: str):
     for attempt in range(3):
         try:
@@ -341,6 +346,5 @@ def _update_task_status(task_id: str, status: str, error: str = "", result_path:
             db.close()
             log.error("Failed to update task %s status: %s", task_id[:8], e)
             return
-
 
 task_queue = TaskQueue()

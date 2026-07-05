@@ -4,6 +4,7 @@ import random
 import signal
 import subprocess
 import shutil
+
 from typing import Optional, Callable, Dict, Any
 from datetime import datetime
 
@@ -16,11 +17,13 @@ log = get_logger("generator")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Tracks running CLI processes keyed by task_id for cancellation support
+RUNNING_PROCESSES: Dict[str, subprocess.Popen] = {}
+
 DEFAULT_MODEL = "mlx-community/flux2-klein-4b-4bit"
 CACHE_DIR = os.path.expanduser("~/.cache/huggingface/hub")
 
 MIN_DISK_MB = 100  # sufficient for output + temp files
-
 
 def _check_disk_space(path: str):
     try:
@@ -36,10 +39,8 @@ def _check_disk_space(path: str):
     except Exception:
         pass
 
-
 def _find_cli(name: str) -> Optional[str]:
     return shutil.which(name)
-
 
 def _resolve_model_path(model_name: str) -> str:
     if os.path.isfile(model_name) or os.path.isdir(model_name):
@@ -61,7 +62,6 @@ def _resolve_model_path(model_name: str) -> str:
                         return name
     return model_name
 
-
 def _pick_cli(model: str) -> Optional[str]:
     model_lower = (model or "").lower()
     if any(kw in model_lower for kw in ("klein", "flux2", "flux.2")):
@@ -70,11 +70,22 @@ def _pick_cli(model: str) -> Optional[str]:
             return cli
     return _find_cli("mflux-generate-flux2") or _find_cli("mflux-generate")
 
+def terminate_process(task_id: str) -> bool:
+    """Send SIGTERM to the running CLI process for the given task, if any.
+    Returns True if a process was found and terminated, False otherwise."""
+    proc = RUNNING_PROCESSES.pop(task_id, None)
+    if proc:
+        try:
+            proc.terminate()
+            log.info("task=%s process %s terminated", task_id[:8], proc.pid)
+        except ProcessLookupError:
+            log.warning("task=%s process %s already exited", task_id[:8], proc.pid)
+        return True
+    return False
 
 def _url_path(filepath: str) -> str:
     rel = os.path.relpath(filepath, os.path.dirname(OUTPUT_DIR))
     return f"/api/output/{os.path.basename(filepath)}"
-
 
 def generate_image(
     prompt: str,
@@ -127,7 +138,6 @@ def generate_image(
         cli=cli,
         prompt=prompt,
         process_registry=process_registry,
-        task_id=task_id,
         output_path=output_path,
         negative_prompt=negative_prompt,
         model=resolved,
@@ -143,7 +153,6 @@ def generate_image(
         image_path=image_path,
         process_holder=process_holder,
     )
-
 
 def _run_cli(
     task_id: str,
@@ -199,6 +208,7 @@ def _run_cli(
             stderr=subprocess.PIPE,
             text=True,
         )
+
         if process_registry is not None:
             process_registry[task_id] = process
 
@@ -262,9 +272,10 @@ def _run_cli(
     except Exception as e:
         log.error("task=%s CLI error: %s", task_id[:8], e)
         raise RuntimeError(f"Generation failed: {e}")
+    finally:
+        RUNNING_PROCESSES.pop(task_id, None)
 
     return None
-
 
 def _save_record(
     task_id: str,
