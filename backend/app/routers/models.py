@@ -10,6 +10,7 @@ from ..database import get_db
 from ..models import ModelRecord
 from ..schemas.schemas import ModelResponse
 from ..services.model_scanner import scan_models
+from ..services.settings_helper import get_settings, resolve_cache_dir, resolve_scan_dirs
 from ..websocket_manager import manager, scan_progress_callback
 
 router = APIRouter(prefix="/api/models", tags=["models"])
@@ -28,8 +29,12 @@ async def scan_local_models(db: Session = Depends(get_db)):
     task_id = str(uuid.uuid4())
     log.info("Starting async model scan (task=%s)...", task_id)
 
-    # Extract DB connection info for background thread
-    def _run_scan(task_id: str):
+    # Load settings from DB for the scanner
+    settings_dict = get_settings(db)
+    cache_dir = resolve_cache_dir(settings_dict)
+    dirs = resolve_scan_dirs(settings_dict)
+
+    def _run_scan(task_id: str, model_cache_dir: str, scan_dirs_list):
         from ..database import SessionLocal
         from ..models import ModelRecord as MR
         log.info("Background scan thread started (task=%s)", task_id)
@@ -39,7 +44,12 @@ async def scan_local_models(db: Session = Depends(get_db)):
 
         scan_start = time.time()
         try:
-            found = scan_models(progress_callback=_progress, timeout=300)
+            found = scan_models(
+                progress_callback=_progress,
+                timeout=300,
+                model_cache_dir=model_cache_dir,
+                scan_dirs=scan_dirs_list,
+            )
             elapsed = time.time() - scan_start
             log.info("Background scan found %d models (task=%s)", len(found), task_id)
 
@@ -69,7 +79,9 @@ async def scan_local_models(db: Session = Depends(get_db)):
             scan_progress_callback(task_id, "_error", f"Scan failed: {e}",
                                    100, 100, time.time() - scan_start)
 
-    thread = threading.Thread(target=_run_scan, args=(task_id,), daemon=True)
+    thread = threading.Thread(
+        target=_run_scan, args=(task_id, cache_dir, dirs), daemon=True
+    )
     thread.start()
 
     return {"task_id": task_id, "status": "scanning"}
@@ -90,11 +102,17 @@ async def get_scan_result(task_id: str, db: Session = Depends(get_db)):
 async def scan_local_models_sync(db: Session = Depends(get_db)):
     """Original synchronous scan endpoint, kept for backward compatibility."""
     log.info("Running sync model scan...")
+
+    # Load settings from DB
+    settings_dict = get_settings(db)
+    cache_dir = resolve_cache_dir(settings_dict)
+    dirs = resolve_scan_dirs(settings_dict)
+
     db.query(ModelRecord).delete()
     db.commit()
     log.info("Cleared old model records")
 
-    found = scan_models()
+    found = scan_models(model_cache_dir=cache_dir, scan_dirs=dirs)
     added = 0
 
     for item in found:

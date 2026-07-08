@@ -83,6 +83,54 @@
         </el-form>
       </el-card>
 
+      <el-card class="settings-card">
+        <template #header>
+          <span>Backend</span>
+        </template>
+        <el-form label-position="left" label-width="140px">
+          <el-form-item label="MLX Executable">
+            <div style="display:flex;align-items:center;gap:8px">
+              <el-input v-model="settings.mlux_executable_path" style="width:300px" placeholder="Auto-detect (PATH)" />
+              <el-tooltip content="Custom path to the mflux CLI executable. Leave empty for auto-detection via PATH." placement="top">
+                <el-icon><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </el-form-item>
+          <el-form-item label="Model Cache Dir">
+            <div style="display:flex;align-items:center;gap:8px">
+              <el-input v-model="settings.model_cache_dir" style="width:300px" placeholder="~/.cache/huggingface/hub" />
+              <el-tooltip content="Directory where HuggingFace model files are cached." placement="top">
+                <el-icon><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </el-form-item>
+          <el-form-item label="Output Directory">
+            <div style="display:flex;align-items:center;gap:8px">
+              <el-input v-model="settings.output_dir" style="width:300px" placeholder="./output" />
+              <el-tooltip content="Directory where generated images are saved. Restart required after change." placement="top">
+                <el-icon><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </el-form-item>
+          <el-form-item label="Upload Directory">
+            <div style="display:flex;align-items:center;gap:8px">
+              <el-input v-model="settings.upload_dir" style="width:300px" placeholder="./uploads" />
+              <el-tooltip content="Directory where uploaded images are stored. Restart required after change." placement="top">
+                <el-icon><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </el-form-item>
+          <el-form-item label="Scan Directories">
+            <div style="display:flex;align-items:center;gap:8px">
+              <el-input v-model="settings.model_scan_dirs" style="width:300px" placeholder="~/Models,~/Downloads/models" />
+              <el-tooltip content="Comma-separated list of directories to scan for models." placement="top">
+                <el-icon><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
       <div class="settings-actions">
         <el-button type="primary" @click="saveSettings" :loading="saving">Save Settings</el-button>
         <el-button @click="resetSettings">Reset</el-button>
@@ -94,6 +142,7 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import api from '@/api'
 import { useAppStore } from '@/stores/app'
 
@@ -109,6 +158,10 @@ const settings = reactive({
   default_cfg: 3.5,
   output_dir: './output',
   history_count: 100,
+  mlux_executable_path: '',
+  model_cache_dir: '',
+  upload_dir: '',
+  model_scan_dirs: '',
 })
 
 onMounted(async () => {
@@ -129,6 +182,10 @@ async function loadSettings() {
     if (res.data.default_model) settings.default_model = res.data.default_model
     if (res.data.output_dir) settings.output_dir = res.data.output_dir
     if (res.data.history_count) settings.history_count = parseInt(res.data.history_count)
+    if (res.data.mlux_executable_path) settings.mlux_executable_path = res.data.mlux_executable_path
+    if (res.data.model_cache_dir) settings.model_cache_dir = res.data.model_cache_dir
+    if (res.data.upload_dir) settings.upload_dir = res.data.upload_dir
+    if (res.data.model_scan_dirs) settings.model_scan_dirs = res.data.model_scan_dirs
   } catch (e) {}
 }
 
@@ -155,6 +212,10 @@ function resetSettings() {
   settings.default_cfg = 3.5
   settings.output_dir = './output'
   settings.history_count = 100
+  settings.mlux_executable_path = ''
+  settings.model_cache_dir = ''
+  settings.upload_dir = ''
+  settings.model_scan_dirs = ''
 }
 </script>
 

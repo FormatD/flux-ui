@@ -36,30 +36,33 @@ def _check_timeout(start_time: float, timeout: float, cancel_event: Optional[thr
     return False
 
 
-def _count_hf_models() -> int:
-    if not os.path.isdir(HF_CACHE_DIR):
+def _count_hf_models(hf_cache_dir: str = "") -> int:
+    cache_dir = hf_cache_dir or HF_CACHE_DIR
+    if not os.path.isdir(cache_dir):
         return 0
     count = 0
-    for entry in os.listdir(HF_CACHE_DIR):
-        if entry.startswith(HF_MODEL_PREFIX) and os.path.isdir(os.path.join(HF_CACHE_DIR, entry)):
-            snap_dir = os.path.join(HF_CACHE_DIR, entry, "snapshots")
+    for entry in os.listdir(cache_dir):
+        if entry.startswith(HF_MODEL_PREFIX) and os.path.isdir(os.path.join(cache_dir, entry)):
+            snap_dir = os.path.join(cache_dir, entry, "snapshots")
             if os.path.isdir(snap_dir) and os.listdir(snap_dir):
                 count += 1
     return count
 
 
-def _scan_hf_cache(progress_callback: Optional[Callable] = None,
+def _scan_hf_cache(hf_cache_dir: str = "",
+                   progress_callback: Optional[Callable] = None,
                    start_time: float = 0,
                    timeout: float = 300,
                    cancel_event: Optional[threading.Event] = None) -> List[Dict]:
+    cache_dir = hf_cache_dir or HF_CACHE_DIR
     found = []
-    if not os.path.isdir(HF_CACHE_DIR):
+    if not os.path.isdir(cache_dir):
         return found
 
-    total_models = _count_hf_models()
+    total_models = _count_hf_models(cache_dir)
     model_idx = 0
 
-    for entry in os.listdir(HF_CACHE_DIR):
+    for entry in os.listdir(cache_dir):
         if not entry.startswith(HF_MODEL_PREFIX):
             continue
 
@@ -67,7 +70,7 @@ def _scan_hf_cache(progress_callback: Optional[Callable] = None,
             log.warning("HF cache scan timed out after %d models", model_idx)
             break
 
-        repo_dir = os.path.join(HF_CACHE_DIR, entry)
+        repo_dir = os.path.join(cache_dir, entry)
         if not os.path.isdir(repo_dir):
             continue
 
@@ -141,14 +144,16 @@ def _scan_hf_cache(progress_callback: Optional[Callable] = None,
     return found
 
 
-def _scan_other_dirs(progress_callback: Optional[Callable] = None,
+def _scan_other_dirs(scan_dirs=None,
+                     progress_callback: Optional[Callable] = None,
                      start_time: float = 0,
                      timeout: float = 300,
                      cancel_event: Optional[threading.Event] = None) -> List[Dict]:
+    dirs = scan_dirs if scan_dirs is not None else SCAN_DIRS
     found = []
     seen_paths = set()
 
-    for scan_dir in SCAN_DIRS:
+    for scan_dir in dirs:
         if not os.path.isdir(scan_dir):
             log.debug("scan dir not found: %s", scan_dir)
             continue
@@ -212,19 +217,21 @@ def _format_size(bytes_val: int) -> str:
 
 def scan_models(progress_callback: Optional[Callable] = None,
                 timeout: float = 300,
-                cancel_event: Optional[threading.Event] = None) -> List[Dict]:
+                cancel_event: Optional[threading.Event] = None,
+                model_cache_dir: str = "",
+                scan_dirs: Optional[List[str]] = None) -> List[Dict]:
     log.info("Starting model scan (timeout=%ss)...", timeout)
     start_time = time.time()
 
     if progress_callback:
         progress_callback("_phase", "Scanning HuggingFace cache...", 0, 3, 0)
 
-    found = _scan_hf_cache(progress_callback, start_time, timeout, cancel_event)
+    found = _scan_hf_cache(model_cache_dir, progress_callback, start_time, timeout, cancel_event)
 
     if not _check_timeout(start_time, timeout, cancel_event):
         if progress_callback:
             progress_callback("_phase", "Scanning local directories...", 1, 3, 0)
-        found += _scan_other_dirs(progress_callback, start_time, timeout, cancel_event)
+        found += _scan_other_dirs(scan_dirs, progress_callback, start_time, timeout, cancel_event)
 
     elapsed = time.time() - start_time
     log.info("Model scan complete: %s models found in %.1fs", len(found), elapsed)

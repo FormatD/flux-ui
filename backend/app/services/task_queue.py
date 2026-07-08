@@ -15,6 +15,7 @@ from ..database import SessionLocal
 from ..models import TaskRecord
 from ..services.generator import generate_image
 from ..services.generator import terminate_process
+from ..services.settings_helper import resolve_cache_dir, resolve_output_dir, resolve_default_model
 
 log = get_logger("task_queue")
 
@@ -199,6 +200,19 @@ class TaskQueue:
                 self._current_task = None
 
     def _run_generation(self, task_id: str, task_data: dict):
+        # Load settings from DB for generator
+        settings_dict = {}
+        try:
+            from ..services.settings_helper import get_settings
+            from ..database import SessionLocal
+            sdb = SessionLocal()
+            settings_dict = get_settings(sdb)
+            sdb.close()
+        except Exception as e:
+            log.warning("task=%s failed to load settings: %s", task_id[:8], e)
+
+        gen_kwargs = {"settings_dict": settings_dict}
+
         ttype = task_data.get("type", "text2img")
         params = task_data.get("params", {})
         total_steps = params.get("steps", 4)
@@ -250,6 +264,7 @@ class TaskQueue:
                         batch_index=i,
                         on_progress=on_progress,
                         process_holder=process_holder,
+                        **gen_kwargs,
                     )
             elif ttype == "img2img":
                 result = generate_image(

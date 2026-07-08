@@ -68,6 +68,22 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
+    # Load settings from DB for the lifespan
+    try:
+        from .database import SessionLocal
+        from .models import Setting
+        from .services.settings_helper import resolve_output_dir, resolve_upload_dir, resolve_cache_dir, resolve_scan_dirs
+        db = SessionLocal()
+        records = db.query(Setting).all()
+        settings_dict = {r.key: r.value for r in records}
+        db.close()
+        od = resolve_output_dir(settings_dict)
+        ud = resolve_upload_dir(settings_dict)
+        cd = resolve_cache_dir(settings_dict)
+        logger.info(f"Settings: output_dir=%s upload_dir=%s cache_dir=%s", od, ud, cd)
+    except Exception as e:
+        logger.warning("Could not load settings from DB: %s", e)
+
     manager.set_loop(asyncio.get_event_loop())
     task_queue.set_progress_callback(progress_callback)
     task_queue.set_broadcast_callback(lambda msg: asyncio.run_coroutine_threadsafe(

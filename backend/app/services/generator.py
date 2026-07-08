@@ -11,19 +11,30 @@ from datetime import datetime
 from ..logger import get_logger
 from ..database import SessionLocal
 from ..models import ImageRecord
+from .settings_helper import resolve_mlux_cli, resolve_cache_dir, resolve_output_dir, resolve_default_model
 
 log = get_logger("generator")
-
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Tracks running CLI processes keyed by task_id for cancellation support
 RUNNING_PROCESSES: Dict[str, subprocess.Popen] = {}
 
 DEFAULT_MODEL = "mlx-community/flux2-klein-4b-4bit"
-CACHE_DIR = os.path.expanduser("~/.cache/huggingface/hub")
 
 MIN_DISK_MB = 100  # sufficient for output + temp files
+
+
+def get_settings_dict() -> Dict[str, str]:
+    """Load settings from DB and return as flat dict."""
+    try:
+        db = SessionLocal()
+        from .settings_helper import get_settings
+        return get_settings(db)
+    except Exception as e:
+        log.warning("Failed to load settings from DB: %s", e)
+        return {}
+    finally:
+        db.close()
+
 
 def _check_disk_space(path: str):
     try:
@@ -39,10 +50,9 @@ def _check_disk_space(path: str):
     except Exception:
         pass
 
-def _find_cli(name: str) -> Optional[str]:
-    return shutil.which(name)
 
-def _resolve_model_path(model_name: str) -> str:
+def _resolve_model_path(model_name: str, cache_dir: str = "") -> str:
+    cache_dir = cache_dir or resolve_cache_dir({})
     if os.path.isfile(model_name) or os.path.isdir(model_name):
         return model_name
     candidates = [model_name]
@@ -51,7 +61,7 @@ def _resolve_model_path(model_name: str) -> str:
         candidates.insert(0, f"black-forest-labs/{model_name}")
     for name in candidates:
         safe_name = name.replace("/", "--")
-        model_dir = os.path.join(CACHE_DIR, f"models--{safe_name}")
+        model_dir = os.path.join(cache_dir, f"models--{safe_name}")
         if os.path.isdir(model_dir):
             snapshots = os.path.join(model_dir, "snapshots")
             if os.path.isdir(snapshots):
@@ -62,13 +72,15 @@ def _resolve_model_path(model_name: str) -> str:
                         return name
     return model_name
 
+
 def _pick_cli(model: str) -> Optional[str]:
     model_lower = (model or "").lower()
     if any(kw in model_lower for kw in ("klein", "flux2", "flux.2")):
-        cli = _find_cli("mflux-generate-flux2")
+        cli = shutil.which("mflux-generate-flux2")
         if cli:
             return cli
-    return _find_cli("mflux-generate-flux2") or _find_cli("mflux-generate")
+    return shutil.which("mflux-generate-flux2") or shutil.which("mflux-generate")
+
 
 def terminate_process(task_id: str) -> bool:
     """Send SIGTERM to the running CLI process for the given task, if any.
@@ -83,9 +95,10 @@ def terminate_process(task_id: str) -> bool:
         return True
     return False
 
+
 def _url_path(filepath: str) -> str:
-    rel = os.path.relpath(filepath, os.path.dirname(OUTPUT_DIR))
     return f"/api/output/{os.path.basename(filepath)}"
+
 
 def generate_image(
     prompt: str,
@@ -104,19 +117,27 @@ def generate_image(
     strength: Optional[float] = None,
     image_path: Optional[str] = None,
     process_holder: Optional[dict] = None,
+    settings_dict: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
+    settings = settings_dict or {}
+    cache_dir = resolve_cache_dir(settings)
+    output_dir = resolve_output_dir(settings)
+    default_model = resolve_default_model(settings)
+
+    os.makedirs(output_dir, exist_ok=True)
+
     if seed is None:
         seed = random.randint(0, 2147483647)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{task_id}_{timestamp}.png"
-    output_path = os.path.join(OUTPUT_DIR, filename)
+    output_path = os.path.join(output_dir, filename)
 
-    model_name = (model or DEFAULT_MODEL).strip()
-    resolved = _resolve_model_path(model_name)
+    model_name = (model or default_model).strip()
+    resolved = _resolve_model_path(model_name, cache_dir)
     is_klein = "klein" in (resolved or model_name).lower()
 
-    _check_disk_space(OUTPUT_DIR)
+    _check_disk_space(output_dir)
 
     log.info(
         "task=%s generate | prompt=%.50s model=%s resolved=%s steps=%s seed=%s size=%sx%s guidance=%s batch=%s/%s",
@@ -124,10 +145,10 @@ def generate_image(
         "1.0" if is_klein else guidance, batch_index + 1, batch_count,
     )
 
-    if not os.path.exists(resolved) and not os.path.isdir(os.path.join(CACHE_DIR, f"models--{resolved.replace('/', '--')}")):
+    if not os.path.exists(resolved) and not os.path.isdir(os.path.join(cache_dir, f"models--{resolved.replace('/', '--')}")):
         log.warning("task=%s model '%s' not found locally, trying anyway", task_id[:8], resolved)
 
-    cli = _pick_cli(model_name)
+    cli = resolve_mlux_cli(settings) or _pick_cli(model_name)
     if not cli:
         raise RuntimeError("No mflux CLI found. Install with: pip install mflux")
 
@@ -153,6 +174,7 @@ def generate_image(
         image_path=image_path,
         process_holder=process_holder,
     )
+
 
 def _run_cli(
     task_id: str,
@@ -276,6 +298,7 @@ def _run_cli(
         RUNNING_PROCESSES.pop(task_id, None)
 
     return None
+
 
 def _save_record(
     task_id: str,

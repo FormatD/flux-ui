@@ -7,7 +7,6 @@ from typing import Optional
 from ..logger import get_logger
 from ..database import get_db
 from ..models import ImageRecord
-from ..services.generator import OUTPUT_DIR
 from ..schemas.schemas import ImageRecordResponse, ImageUpdate
 
 router = APIRouter(prefix="/api/images", tags=["images"])
