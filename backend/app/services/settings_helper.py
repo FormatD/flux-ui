@@ -23,11 +23,6 @@ def get_settings(db: Session) -> Dict[str, str]:
     return {r.key: r.value for r in records}
 
 
-def get_setting(settings_dict: Dict[str, str], key: str, default: str = "") -> str:
-    """Get a single setting with fallback."""
-    return settings_dict.get(key, default)
-
-
 def resolve_mlux_cli(settings_dict: Dict[str, str]) -> Optional[str]:
     """Return custom mlux executable path from settings, or auto-detect via shutil.which."""
     custom = settings_dict.get("mlux_executable_path", "").strip()

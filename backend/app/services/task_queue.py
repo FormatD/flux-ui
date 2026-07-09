@@ -206,8 +206,10 @@ class TaskQueue:
             from ..services.settings_helper import get_settings
             from ..database import SessionLocal
             sdb = SessionLocal()
-            settings_dict = get_settings(sdb)
-            sdb.close()
+            try:
+                settings_dict = get_settings(sdb)
+            finally:
+                sdb.close()
         except Exception as e:
             log.warning("task=%s failed to load settings: %s", task_id[:8], e)
 
@@ -283,6 +285,7 @@ class TaskQueue:
                     image_path=params.get("image_path", ""),
                     on_progress=on_progress,
                     process_holder=process_holder,
+                    **gen_kwargs,
                 )
             else:
                 log.warning("task %s unknown type: %s", task_id[:8], ttype)

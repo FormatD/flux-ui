@@ -74,9 +74,11 @@ async def lifespan(app: FastAPI):
         from .models import Setting
         from .services.settings_helper import resolve_output_dir, resolve_upload_dir, resolve_cache_dir, resolve_scan_dirs
         db = SessionLocal()
-        records = db.query(Setting).all()
-        settings_dict = {r.key: r.value for r in records}
-        db.close()
+        try:
+            records = db.query(Setting).all()
+            settings_dict = {r.key: r.value for r in records}
+        finally:
+            db.close()
         od = resolve_output_dir(settings_dict)
         ud = resolve_upload_dir(settings_dict)
         cd = resolve_cache_dir(settings_dict)

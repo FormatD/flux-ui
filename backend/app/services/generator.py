@@ -23,19 +23,6 @@ DEFAULT_MODEL = "mlx-community/flux2-klein-4b-4bit"
 MIN_DISK_MB = 100  # sufficient for output + temp files
 
 
-def get_settings_dict() -> Dict[str, str]:
-    """Load settings from DB and return as flat dict."""
-    try:
-        db = SessionLocal()
-        from .settings_helper import get_settings
-        return get_settings(db)
-    except Exception as e:
-        log.warning("Failed to load settings from DB: %s", e)
-        return {}
-    finally:
-        db.close()
-
-
 def _check_disk_space(path: str):
     try:
         st = os.statvfs(path)
@@ -125,6 +112,9 @@ def generate_image(
     default_model = resolve_default_model(settings)
 
     os.makedirs(output_dir, exist_ok=True)
+
+    # Enforce minimum steps for quality
+    steps = max(steps, 2)
 
     if seed is None:
         seed = random.randint(0, 2147483647)
